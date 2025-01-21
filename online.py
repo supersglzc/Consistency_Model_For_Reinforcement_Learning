@@ -6,8 +6,8 @@ import torch
 import json
 import time
 import random
-
-import d4rl
+import gymnasium
+# import d4rl
 from utils import utils
 from utils.data_sampler import Data_Sampler
 from utils.logger import logger, setup_logger
@@ -38,6 +38,7 @@ hyperparameters = {
     'kitchen-complete-v0':           {'lr': 1e-5,  'max_q_backup': False,  'reward_tune': 'no',          'eval_freq': 50,  'gn': 9.0,  },
     'kitchen-partial-v0':            {'lr': 1e-5,  'max_q_backup': False,  'reward_tune': 'no',          'eval_freq': 50,  'gn': 10.0, },
     'kitchen-mixed-v0':              {'lr': 1e-5,  'max_q_backup': False,  'reward_tune': 'no',          'eval_freq': 50,  'gn': 10.0, },
+    'dm_control/humanoid-walk':            {'lr': 1e-5,  'max_q_backup': False,  'reward_tune': 'no',          'eval_freq': 50,  'gn': 1.0,  },
 }
 
 def make_env(args):
@@ -54,8 +55,16 @@ def linear_schedule(start_e: float, end_e: float, duration: int, t: int):
     slope = (end_e - start_e) / duration
     return max(slope * t + start_e, end_e)
 
-def train_agent(state_dim, action_dim, max_action, device, output_dir, writer, args):
+def init_wandb(args):
+    import wandb
+    wandb_run = wandb.init(project='ICML_GYM_RUNS',
+                           mode='online',
+                           job_type=f'{args.env_name}_Diffusion-QL',
+                        #    entity='di-skill',
+                           name=f'seed_{args.seed}')
+    return wandb_run
 
+def train_agent(state_dim, action_dim, max_action, device, output_dir, writer, args):
     agent = Agent(state_dim=state_dim,
                 action_dim=action_dim,
                 max_action=max_action,
@@ -69,17 +78,27 @@ def train_agent(state_dim, action_dim, max_action, device, output_dir, writer, a
                 lr=args.lr,
                 lr_decay=args.lr_decay,
                 grad_norm=args.gn)
+    
+    wandb_run = init_wandb(args)
 
     if args.load_model != "":
         agent.load_model(args.load_model, args.load_id)
         print(f"Loaded agent from: {args.load_model} with id: {args.load_id}")
 
-    envs = gym.vector.SyncVectorEnv([make_env(args) for _ in range(args.num_envs)])
+    # envs = gym.vector.SyncVectorEnv([make_env(args) for _ in range(args.num_envs)])
+    if 'dm_control' in args.env_name:
+        from wrappers import DMCEnvWrapper
+        env = gymnasium.vector.make(args.env_name, num_envs=args.num_envs)
+        env = DMCEnvWrapper(env)
+    else:
+        from wrappers import GYMEnvWrapper
+        env = gym.make(args.env_name)
+        env = GYMEnvWrapper(env)
 
     rb = ReplayBuffer(
         args.buffer_size,
-        envs.single_observation_space,
-        envs.single_action_space,
+        env.observation_space,
+        env.action_space,
         device,
         args.num_envs,
         optimize_memory_usage=True,
@@ -88,39 +107,50 @@ def train_agent(state_dim, action_dim, max_action, device, output_dir, writer, a
     start_time = time.time()
     evaluations = []
 
-    obs = envs.reset()
-    for global_step in range(args.total_timesteps): 
+    obs = env.reset()
+    for global_step in range(args.total_timesteps):
         epsilon = linear_schedule(args.start_e, args.end_e, args.exploration_fraction * args.total_timesteps, global_step)     
         obs = obs.reshape(args.num_envs, -1) 
         if random.random() < epsilon:
-            actions = np.array([envs.single_action_space.sample() for _ in range(envs.num_envs)])
+            actions = np.array(env.action_space.sample())
         else:
             actions = []
             for o in obs:   
                 actions.append(agent.sample_action(np.array(o)))
             actions = np.array(actions)
 
-        next_obs, rewards, dones, infos = envs.step(actions)
+        next_obs, rewards, dones, infos = env.step(actions)
 
-        for info in infos:
-            if "episode" in info.keys():
-                print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
-                writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
-                writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
-                writer.add_scalar("charts/epsilon", epsilon, global_step)
-                break
+        # for info in infos:
+        #     if "episode" in info.keys():
+        #         print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
+        #         writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
+        #         writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
+        #         writer.add_scalar("charts/epsilon", epsilon, global_step)
+        #         break infos:
+        #     if "episode" in info.keys():
+        #         print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
+        #         writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
+        #         writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
+        #         writer.add_scalar("charts/epsilon", epsilon, global_step)
+        #         break
 
-        real_next_obs = next_obs.copy()
-        for idx, d in enumerate(dones):
-            if d:
-                real_next_obs[idx] = infos[idx]["terminal_observation"]
-        real_next_obs = real_next_obs.reshape(args.num_envs, -1) 
+        # real_next_obs = next_obs.copy()
+        # for idx, d in enumerate(dones):
+        #     if d:
+        #         real_next_obs[idx] = infos[idx]["terminal_observation"]
+        # real_next_obs = real_next_obs.reshape(a
 
-        rb.add(obs.astype(np.float32), real_next_obs.astype(np.float32), actions, rewards, dones, infos)
+        # real_next_obs = next_obs.copy()
+        # for idx, d in enumerate(dones):
+        #     if d:
+        #         real_next_obs[idx] = infos[idx]["terminal_observation"]
+        # real_next_obs = real_next_obs.reshape(a
+        rb.add(obs.astype(np.float32), next_obs.astype(np.float32), actions, rewards, dones, infos)
         obs = next_obs
 
         # train
-        if global_step > args.learning_starts:
+        if global_step >= args.learning_starts:
             if global_step % args.train_frequency == 0:
                 loss_metric = agent.train(rb,
                                         iterations=1,
@@ -131,12 +161,13 @@ def train_agent(state_dim, action_dim, max_action, device, output_dir, writer, a
                 critic_loss = np.mean(loss_metric['critic_loss'])
                 used_time = curr_time - start_time
 
-        if global_step > args.learning_starts and global_step % args.eval_frequency == 0:
+        if global_step >= args.learning_starts and global_step % args.eval_frequency == 0:
             # Evaluation
-            eval_res, eval_res_std, eval_norm_res, eval_norm_res_std = eval_policy(agent, args.env_name, args.seed,
+            eval_res, eval_res_std = eval_policy(agent, args.env_name, args.seed,
+                                                                                global_step, wandb_run,
                                                                                 eval_episodes=args.eval_episodes)
 
-            evaluations.append([eval_res, eval_res_std, eval_norm_res, eval_norm_res_std,
+            evaluations.append([eval_res, eval_res_std,
                                  global_step])
             np.save(os.path.join(output_dir, "eval"), evaluations)
             utils.print_banner(f"Train step: {global_step}", separator="*", num_star=90)
@@ -149,16 +180,19 @@ def train_agent(state_dim, action_dim, max_action, device, output_dir, writer, a
                 logger.record_tabular('Critic Loss', critic_loss)
                 logger.record_tabular('Time', used_time)
 
+                wandb_run.log({'train/actor_loss': actor_loss,
+                               'train/critic_loss': critic_loss,
+                               'global_step': global_step})
+
                 writer.add_scalar(f"charts/time", used_time, global_step)
 
             logger.record_tabular('Average Episodic Reward', eval_res)
-            logger.record_tabular('Average Episodic N-Reward', eval_norm_res)
+            wandb_run.log({'rollout/ep_rew_mean': eval_res,
+                           'global_step': global_step})
             logger.dump_tabular()
 
             writer.add_scalar(f"eval_charts/eval_reward", eval_res, global_step)
             writer.add_scalar(f"eval_charts/eval_reward_std", eval_res_std, global_step)
-            writer.add_scalar(f"eval_charts/eval_norm_reward", eval_norm_res, global_step)
-            writer.add_scalar(f"eval_charts/eval_norm_reward_std", eval_norm_res_std, global_step)
 
         if args.save_best_model:
             agent.save_model(output_dir, global_step)
@@ -166,9 +200,16 @@ def train_agent(state_dim, action_dim, max_action, device, output_dir, writer, a
 
 # Runs policy for X episodes and returns average reward
 # A fixed seed is used for the eval environment
-def eval_policy(policy, env_name, seed, eval_episodes=10):
-    eval_env = gym.make(env_name)
-    eval_env.seed(seed + 100)
+def eval_policy(policy, env_name, seed, steps, wandb_run, eval_episodes=5):
+    print("Evaluating...")
+    if 'dm_control' in args.env_name:
+        from wrappers import DMCEnvWrapper
+        eval_env = gymnasium.vector.make(args.env_name, num_envs=1)
+        eval_env = DMCEnvWrapper(eval_env)
+    else:
+        from wrappers import GYMEnvWrapper
+        eval_env = gym.make(args.env_name)
+        eval_env = GYMEnvWrapper(eval_env)
 
     policy.model.eval()
     policy.actor.eval()
@@ -187,13 +228,16 @@ def eval_policy(policy, env_name, seed, eval_episodes=10):
     avg_reward = np.mean(scores)
     std_reward = np.std(scores)
 
-    normalized_scores = [eval_env.get_normalized_score(s) for s in scores]
-    avg_norm_score = eval_env.get_normalized_score(avg_reward)
-    std_norm_score = np.std(normalized_scores)
+    # normalized_scores = [eval_env.get_normalized_score(s) for s in scores]
+    # avg_norm_score = eval_env.get_normalized_score(avg_reward)
+    # std_norm_score = np.std(normalized_scores)
     policy.model.train()
     policy.actor.train()
-    utils.print_banner(f"Evaluation over {eval_episodes} episodes: {avg_reward:.2f} {avg_norm_score:.2f}")
-    return avg_reward, std_reward, avg_norm_score, std_norm_score
+    print(avg_reward)
+    wandb_run.log({'eval/mean_reward': avg_reward,
+                   'global_step': steps})
+    # utils.print_banner(f"Evaluation over {eval_episodes} episodes: {avg_reward:.2f} {avg_norm_score:.2f}")
+    return avg_reward, std_reward# avg_norm_score, std_norm_score
 
 
 if __name__ == "__main__":
@@ -204,7 +248,7 @@ if __name__ == "__main__":
     parser.add_argument("--env_name", default="walker2d-medium-expert-v2", type=str)  # OpenAI gym environment name
     parser.add_argument("--dir", default="results", type=str)                    # Logging directory
     parser.add_argument("--seed", default=0, type=int)                         # Sets Gym, PyTorch and Numpy seeds
-    parser.add_argument("--num_envs", default=2, type=int)                         # Sets Gym, PyTorch and Numpy seeds
+    parser.add_argument("--num_envs", default=1, type=int)                         # Sets Gym, PyTorch and Numpy seeds
     parser.add_argument("--total_timesteps", type=int, default=1000000, help="total timesteps of the experiments")
     parser.add_argument('--wandb_activate', type=bool, default=False, help='activate wandb for logging')
     parser.add_argument('--wandb_entity', type=str, default='', help='wandb entity')
@@ -217,12 +261,12 @@ if __name__ == "__main__":
     parser.add_argument('--early_stop', action='store_true')
     parser.add_argument('--save_best_model', action='store_true')
     
-    ### RL Parameters ###
+    ### RL Parameters ###eval_freq
     parser.add_argument("--discount", default=0.99, type=float)
     parser.add_argument("--tau", default=0.005, type=float)
-    parser.add_argument("--buffer_size", type=int, default=100000, help="the replay memory buffer size")
+    parser.add_argument("--buffer_size", type=int, default=1000000, help="the replay memory buffer size")
     parser.add_argument("--learning_starts", type=int, default=0, help="timestep to start learning")
-    parser.add_argument("--train_frequency", type=int, default=4, help="the frequency of training")
+    parser.add_argument("--train_frequency", type=int, default=1, help="the frequency of training")
     parser.add_argument("--eval_frequency", type=int, default=10000, help="the frequency of training")
     parser.add_argument("--start_e", type=float, default=1, help="the starting epsilon for exploration")
     parser.add_argument("--end_e", type=float, default=0.01, help="the ending epsilon for exploration")
@@ -249,13 +293,13 @@ if __name__ == "__main__":
     args.device = f"cuda:{args.device}" if torch.cuda.is_available() else "cpu"
     args.output_dir = f'{args.dir}'
 
-    args.eval_freq = hyperparameters[args.env_name]['eval_freq']
-    args.eval_episodes = 10 if 'v2' in args.env_name else 100
+    args.eval_freq = 50  # hyperparameters[args.env_name]['eval_freq']
+    args.eval_episodes = 5
 
-    args.lr = hyperparameters[args.env_name]['lr']
-    args.max_q_backup = hyperparameters[args.env_name]['max_q_backup']
-    args.reward_tune = hyperparameters[args.env_name]['reward_tune']
-    args.gn = hyperparameters[args.env_name]['gn']
+    args.lr = 1e-5  # hyperparameters[args.env_name]['lr']
+    args.max_q_backup = False  # hyperparameters[args.env_name]['max_q_backup']
+    args.reward_tune = 'no'  # hyperparameters[args.env_name]['reward_tune']
+    args.gn = 1.0  # hyperparameters[args.env_name]['gn']
 
     # if args.wandb_activate:
     #     args.wandb_project = 'consistency-rl-online'
@@ -271,7 +315,7 @@ if __name__ == "__main__":
 
     # Setup Logging
     file_name = f"{args.env_name}|{args.exp}|{args.model}-{args.algo}|T-{args.T}"
-    if args.lr_decay: file_name += '|lr_decay'
+    if args.lr_decay: fileisinstance_name += '|lr_decay'
 
     file_name += f'|{args.seed}'
 
@@ -279,19 +323,23 @@ if __name__ == "__main__":
     if not os.path.exists(results_dir):
         os.makedirs(results_dir)
     utils.print_banner(f"Saving location: {results_dir}")
-    if os.path.exists(os.path.join(results_dir, 'variant.json')):
-        raise AssertionError("Experiment under this setting has been done!")
+    # if os.path.exists(os.path.join(results_dir, 'variant.json')):
+    #     raise AssertionError("Experiment under this setting has been done!")
     variant = vars(args)
     variant.update(version=f"{args.model}-policies-RL")
 
-    env = gym.make(args.env_name)
-
-    env.seed(args.seed)
+    if 'dm_control' in args.env_name:
+        from wrappers import DMCEnvWrapper
+        env = gymnasium.make(args.env_name)
+        env = DMCEnvWrapper(env)
+    else:
+        env = gym.make(args.env_name)
+        env.seed(args.seed)
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
-    state_dim = env.observation_space.shape[0]
-    action_dim = env.action_space.shape[0] 
+    state_dim = env.observation_space.shape[-1]
+    action_dim = env.action_space.shape[-1] 
     max_action = float(env.action_space.high[0])
 
     variant.update(state_dim=state_dim)
