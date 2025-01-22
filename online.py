@@ -7,7 +7,7 @@ import json
 import time
 import random
 import gymnasium
-# import d4rl
+import d4rl
 from utils import utils
 from utils.data_sampler import Data_Sampler
 from utils.logger import logger, setup_logger
@@ -264,7 +264,7 @@ if __name__ == "__main__":
     ### RL Parameters ###eval_freq
     parser.add_argument("--discount", default=0.99, type=float)
     parser.add_argument("--tau", default=0.005, type=float)
-    parser.add_argument("--buffer_size", type=int, default=1000000, help="the replay memory buffer size")
+    parser.add_argument("--buffer_size", type=int, default=100000, help="the replay memory buffer size")
     parser.add_argument("--learning_starts", type=int, default=0, help="timestep to start learning")
     parser.add_argument("--train_frequency", type=int, default=1, help="the frequency of training")
     parser.add_argument("--eval_frequency", type=int, default=10000, help="the frequency of training")
