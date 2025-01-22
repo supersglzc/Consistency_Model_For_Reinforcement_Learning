@@ -38,6 +38,7 @@ hyperparameters = {
     'kitchen-complete-v0':           {'lr': 1e-5,  'max_q_backup': False,  'reward_tune': 'no',          'eval_freq': 50,  'gn': 9.0,  },
     'kitchen-partial-v0':            {'lr': 1e-5,  'max_q_backup': False,  'reward_tune': 'no',          'eval_freq': 50,  'gn': 10.0, },
     'kitchen-mixed-v0':              {'lr': 1e-5,  'max_q_backup': False,  'reward_tune': 'no',          'eval_freq': 50,  'gn': 10.0, },
+    'Ant-v3':                        {'lr': 1e-5,  'max_q_backup': False,  'reward_tune': 'no',          'eval_freq': 50,  'gn': 10.0, },
 }
 
 def make_env(args):
@@ -54,7 +55,18 @@ def linear_schedule(start_e: float, end_e: float, duration: int, t: int):
     slope = (end_e - start_e) / duration
     return max(slope * t + start_e, end_e)
 
+def init_wandb(args):
+    import wandb
+    wandb_run = wandb.init(project='ICML_GYM_RUNS',
+                           mode='online',
+                           job_type=f'{args.env_name}_DiffusionQL',
+                        #    entity='di-skill',
+                           name=f'{args.env_name}_seed_{args.seed}')
+    return wandb_run
+
 def train_agent(state_dim, action_dim, max_action, device, output_dir, writer, args):
+
+    wandb_run = init_wandb(args)
 
     agent = Agent(state_dim=state_dim,
                 action_dim=action_dim,
@@ -104,7 +116,7 @@ def train_agent(state_dim, action_dim, max_action, device, output_dir, writer, a
 
         for info in infos:
             if "episode" in info.keys():
-                print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
+                # print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
                 writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
                 writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
                 writer.add_scalar("charts/epsilon", epsilon, global_step)
@@ -131,12 +143,14 @@ def train_agent(state_dim, action_dim, max_action, device, output_dir, writer, a
                 critic_loss = np.mean(loss_metric['critic_loss'])
                 used_time = curr_time - start_time
 
+        wandb_run.log({'global_step': global_step})
         if global_step > args.learning_starts and global_step % args.eval_frequency == 0:
             # Evaluation
-            eval_res, eval_res_std, eval_norm_res, eval_norm_res_std = eval_policy(agent, args.env_name, args.seed,
+            eval_res, eval_res_std = eval_policy(agent, args.env_name, args.seed,
                                                                                 eval_episodes=args.eval_episodes)
-
-            evaluations.append([eval_res, eval_res_std, eval_norm_res, eval_norm_res_std,
+            wandb_run.log({'eval/mean_reward': eval_res,
+                   'global_step': global_step})
+            evaluations.append([eval_res, eval_res_std,
                                  global_step])
             np.save(os.path.join(output_dir, "eval"), evaluations)
             utils.print_banner(f"Train step: {global_step}", separator="*", num_star=90)
@@ -152,13 +166,13 @@ def train_agent(state_dim, action_dim, max_action, device, output_dir, writer, a
                 writer.add_scalar(f"charts/time", used_time, global_step)
 
             logger.record_tabular('Average Episodic Reward', eval_res)
-            logger.record_tabular('Average Episodic N-Reward', eval_norm_res)
+            # logger.record_tabular('Average Episodic N-Reward', eval_norm_res)
             logger.dump_tabular()
 
             writer.add_scalar(f"eval_charts/eval_reward", eval_res, global_step)
             writer.add_scalar(f"eval_charts/eval_reward_std", eval_res_std, global_step)
-            writer.add_scalar(f"eval_charts/eval_norm_reward", eval_norm_res, global_step)
-            writer.add_scalar(f"eval_charts/eval_norm_reward_std", eval_norm_res_std, global_step)
+            # writer.add_scalar(f"eval_charts/eval_norm_reward", eval_norm_res, global_step)
+            # writer.add_scalar(f"eval_charts/eval_norm_reward_std", eval_norm_res_std, global_step)
 
         if args.save_best_model:
             agent.save_model(output_dir, global_step)
@@ -187,13 +201,13 @@ def eval_policy(policy, env_name, seed, eval_episodes=10):
     avg_reward = np.mean(scores)
     std_reward = np.std(scores)
 
-    normalized_scores = [eval_env.get_normalized_score(s) for s in scores]
-    avg_norm_score = eval_env.get_normalized_score(avg_reward)
-    std_norm_score = np.std(normalized_scores)
+    # normalized_scores = [eval_env.get_normalized_score(s) for s in scores]
+    # avg_norm_score = eval_env.get_normalized_score(avg_reward)
+    # std_norm_score = np.std(normalized_scores)
     policy.model.train()
     policy.actor.train()
-    utils.print_banner(f"Evaluation over {eval_episodes} episodes: {avg_reward:.2f} {avg_norm_score:.2f}")
-    return avg_reward, std_reward, avg_norm_score, std_norm_score
+    utils.print_banner(f"Evaluation over {eval_episodes} episodes: {avg_reward:.2f}")
+    return avg_reward, std_reward, # avg_norm_score, std_norm_score
 
 
 if __name__ == "__main__":
