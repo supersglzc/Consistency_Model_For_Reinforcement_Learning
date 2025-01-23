@@ -1,5 +1,6 @@
 import argparse
-import gym
+# import gym
+import gymnasium as gym
 import numpy as np
 import os
 import torch
@@ -8,6 +9,7 @@ import time
 import random
 
 import d4rl
+from wrappers import DMCEnvWrapper
 from utils import utils
 from utils.data_sampler import Data_Sampler
 from utils.logger import logger, setup_logger
@@ -89,7 +91,12 @@ def train_agent(state_dim, action_dim, max_action, device, output_dir, writer, a
         agent.load_model(args.load_model, args.load_id)
         print(f"Loaded agent from: {args.load_model} with id: {args.load_id}")
 
-    envs = gym.vector.SyncVectorEnv([make_env(args) for _ in range(args.num_envs)])
+    if 'dm_control' in args.env_name:
+        from wrappers import DMCEnvWrapper
+        envs = gym.vector.make(args.env_name, num_envs=args.num_envs)
+        envs = DMCEnvWrapper(envs, args.num_envs)
+    else:
+        envs = gym.vector.SyncVectorEnv([make_env(args) for _ in range(args.num_envs)])
 
     rb = ReplayBuffer(
         args.buffer_size,
@@ -114,21 +121,20 @@ def train_agent(state_dim, action_dim, max_action, device, output_dir, writer, a
             for o in obs:   
                 actions.append(agent.sample_action(np.array(o)))
             actions = np.array(actions)
-
         next_obs, rewards, dones, infos = envs.step(actions)
 
-        for info in infos:
-            if "episode" in info.keys():
-                # print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
-                writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
-                writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
-                writer.add_scalar("charts/epsilon", epsilon, global_step)
-                break
+        # for info in infos:
+        #     if "episode" in info.keys():
+        #         print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
+        #         writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
+        #         writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
+        #         writer.add_scalar("charts/epsilon", epsilon, global_step)
+        #         break
 
         real_next_obs = next_obs.copy()
-        for idx, d in enumerate(dones):
-            if d:
-                real_next_obs[idx] = infos[idx]["terminal_observation"]
+        # for idx, d in enumerate(dones):
+        #     if d:
+        #         real_next_obs[idx] = infos[idx]["terminal_observation"]
         real_next_obs = real_next_obs.reshape(args.num_envs, -1) 
 
         rb.add(obs.astype(np.float32), real_next_obs.astype(np.float32), actions, rewards, dones, infos)
@@ -183,15 +189,16 @@ def train_agent(state_dim, action_dim, max_action, device, output_dir, writer, a
 
 # Runs policy for X episodes and returns average reward
 # A fixed seed is used for the eval environment
-def eval_policy(policy, env_name, seed, eval_episodes=10):
+def eval_policy(policy, env_name, seed, eval_episodes=5):
     eval_env = gym.make(env_name)
-    eval_env.seed(seed + 100)
+    eval_env = DMCEnvWrapper(eval_env, 1)
+    # eval_env.seed(seed + 100)
 
     policy.model.eval()
     policy.actor.eval()
 
     scores = []
-    for _ in range(eval_episodes):
+    for i in range(eval_episodes):
         traj_return = 0.
         state, done = eval_env.reset(), False
         while not done:
@@ -267,7 +274,7 @@ if __name__ == "__main__":
     args.output_dir = f'{args.dir}'
 
     args.eval_freq = hyperparameters[args.env_name]['eval_freq']
-    args.eval_episodes = 10 if 'v2' in args.env_name else 100
+    args.eval_episodes = 10 # if 'v2' in args.env_name else 100
 
     args.lr = hyperparameters[args.env_name]['lr']
     args.max_q_backup = hyperparameters[args.env_name]['max_q_backup']
@@ -302,13 +309,14 @@ if __name__ == "__main__":
     variant.update(version=f"{args.model}-policies-RL")
 
     env = gym.make(args.env_name)
+    env = DMCEnvWrapper(env, 1)
 
-    env.seed(args.seed)
+    # env.seed(args.seed)
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
-    state_dim = env.observation_space.shape[0]
-    action_dim = env.action_space.shape[0] 
+    state_dim = env.observation_space.shape[-1]
+    action_dim = env.action_space.shape[-1] 
     max_action = float(env.action_space.high[0])
 
     variant.update(state_dim=state_dim)
