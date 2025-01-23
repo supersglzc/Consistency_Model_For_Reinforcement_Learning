@@ -267,7 +267,7 @@ if __name__ == "__main__":
     args.output_dir = f'{args.dir}'
 
     args.eval_freq = hyperparameters[args.env_name]['eval_freq']
-    args.eval_episodes = 10 if 'v2' in args.env_name else 100
+    args.eval_episodes = 10 #if 'v2' in args.env_name else 100
 
     args.lr = hyperparameters[args.env_name]['lr']
     args.max_q_backup = hyperparameters[args.env_name]['max_q_backup']
