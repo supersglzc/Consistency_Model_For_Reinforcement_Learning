@@ -44,6 +44,10 @@ hyperparameters = {
     'Humanoid-v3':                   {'lr': 1e-5,  'max_q_backup': False,  'reward_tune': 'no',          'eval_freq': 50,  'gn': 10.0, },
     'dm_control/humanoid-stand':     {'lr': 1e-5,  'max_q_backup': False,  'reward_tune': 'no',          'eval_freq': 50,  'gn': 10.0, },
     'dm_control/dog-stand':          {'lr': 1e-5,  'max_q_backup': False,  'reward_tune': 'no',          'eval_freq': 50,  'gn': 10.0, },
+    'dm_control/humanoid-walk':     {'lr': 1e-5,  'max_q_backup': False,  'reward_tune': 'no',          'eval_freq': 50,  'gn': 10.0, },
+    'dm_control/dog-walk':          {'lr': 1e-5,  'max_q_backup': False,  'reward_tune': 'no',          'eval_freq': 50,  'gn': 10.0, },
+    'dm_control/humanoid-run':     {'lr': 1e-5,  'max_q_backup': False,  'reward_tune': 'no',          'eval_freq': 50,  'gn': 10.0, },
+    'dm_control/dog-run':          {'lr': 1e-5,  'max_q_backup': False,  'reward_tune': 'no',          'eval_freq': 50,  'gn': 10.0, },
 }
 
 def make_env(args):
