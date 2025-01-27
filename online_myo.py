@@ -212,10 +212,12 @@ def eval_policy(policy, env_name, seed, eval_episodes=5):
         done = False
         while not done:
             action = policy.sample_action(np.array(state))
-            state, reward, terminated, truncated, info = eval_env.step(action)
-            done = np.logical_or(terminated, truncated)
+            state, reward, done, _, info = eval_env.step(action)
             # eval_env.render()
-            traj_return += float(info.get("solved"))
+            if done:
+                traj_return += float(info.get("is_success") or info.get("solved"))
+            else:
+                traj_return += 0.0
         scores.append(traj_return)
 
     avg_reward = np.mean(scores)
