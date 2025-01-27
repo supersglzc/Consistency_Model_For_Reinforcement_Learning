@@ -1,0 +1,48 @@
+exp: 'exp_1'                    # Experiment ID
+device: 0                       # device, {"cpu", "cuda", "cuda:0", "cuda:1"}, etc
+env_name: "walker2d-medium-expert-v2"  # OpenAI gym environment name
+dir: "results"                    # Logging directory
+output_dir: "results"
+seed: 0                         # Sets Gym, PyTorch and Numpy seeds
+num_envs: 2                         # Sets Gym, PyTorch and Numpy seeds
+total_timesteps: 1000000        # total timesteps of the experiments
+wandb_activate: False           # activate wandb for logging
+wandb_entity: ''               # wandb entity
+wandb_group: ''                # wandb group
+wandb_name: ''                 # wandb name
+
+### Optimization Setups ###
+batch_size: 256
+lr_decay: False
+early_stop: False
+save_best_model: False
+
+### RL Parameters ###
+discount: 0.99
+tau: 0.005
+buffer_size: 100000            # the replay memory buffer size
+learning_starts: 0             # timestep to start learning
+train_frequency: 4             # the frequency of training
+eval_frequency: 10000          # the frequency of training
+start_e: 1                     # the starting epsilon for exploration
+end_e: 0.01                    # the ending epsilon for exploration
+exploration_fraction: 0.10      # the fraction of `total-timesteps` it takes from start-e to go end-e
+
+### Diffusion Setting ###
+T: 5
+beta_schedule: 'vp'
+
+### Algo Choice ###
+algo: "online"
+model: "consistency"           # ['diffusion', 'consistency']
+eta: -1.0
+load_model: ''                 # load pretrained checkpoint
+load_id: ''                    # model id to load
+
+
+eval_episodes: 10
+lr: 1e-5
+max_q_backup: False
+reward_tune: 'no'
+eval_freq: 50
+gn: 10.0
