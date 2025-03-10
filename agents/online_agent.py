@@ -44,6 +44,60 @@ class Critic(nn.Module):
         return torch.min(q1, q2)
 
 
+class DistributionalCritic(nn.Module):
+    def __init__(self, state_dim, act_dim, v_min=-10, v_max=10, num_atoms=101, hidden_dim=256, device="cuda"):
+        super().__init__()
+        self.device = device
+        self.net_q1 = nn.Sequential(nn.Linear(state_dim + act_dim, hidden_dim),
+                                      nn.Mish(),
+                                      nn.Linear(hidden_dim, hidden_dim),
+                                      nn.Mish(),
+                                      nn.Linear(hidden_dim, hidden_dim),
+                                      nn.Mish(),
+                                      nn.Linear(hidden_dim, num_atoms))
+        self.net_q2 = nn.Sequential(nn.Linear(state_dim + act_dim, hidden_dim),
+                                      nn.Mish(),
+                                      nn.Linear(hidden_dim, hidden_dim),
+                                      nn.Mish(),
+                                      nn.Linear(hidden_dim, hidden_dim),
+                                      nn.Mish(),
+                                      nn.Linear(hidden_dim, num_atoms))
+
+        self.z_atoms = torch.linspace(v_min, v_max, num_atoms, device=device)
+
+    def q_min(self, state, action):
+        Q1, Q2 = self.forward(state, action)
+        Q1 = torch.sum(Q1 * self.z_atoms.to(self.device), dim=1)
+        Q2 = torch.sum(Q2 * self.z_atoms.to(self.device), dim=1)
+        return torch.min(Q1, Q2)  # min Q value
+
+    def forward(self, state, action):
+        input_x = torch.cat((state, action), dim=1)
+        return torch.softmax(self.net_q1(input_x), dim=1), torch.softmax(self.net_q2(input_x), dim=1)  # two Q values
+
+    def q1(self, state, action):
+        input_x = torch.cat((state, action), dim=1)
+        return torch.softmax(self.net_q1(input_x), dim=1)
+
+def projection(next_dist, reward, done, gamma, v_min=-10, v_max=10, num_atoms=51, support=None, device="cuda:0"):
+    delta_z = (v_max - v_min) / (num_atoms - 1)
+    batch_size = reward.shape[0]
+
+    target_z = (reward + (1 - done) * gamma * support).clamp(min=v_min, max=v_max)
+    b = (target_z - v_min) / delta_z
+    l = b.floor().long()
+    u = b.ceil().long()
+
+    l[torch.logical_and((u > 0), (l == u))] -= 1
+    u[torch.logical_and((l < (num_atoms - 1)), (l == u))] += 1
+
+    proj_dist = torch.zeros_like(next_dist)
+    offset = torch.linspace(0, (batch_size - 1) * num_atoms, batch_size, device=device).unsqueeze(1).expand(batch_size, num_atoms).long()
+    proj_dist.view(-1).index_add_(0, (l + offset).view(-1), (next_dist * (u.float() - b)).view(-1))
+    proj_dist.view(-1).index_add_(0, (u + offset).view(-1), (next_dist * (b - l.float())).view(-1))
+    return proj_dist
+
+
 class OnlineAgent(object):
     def __init__(self,
                  state_dim,
@@ -63,6 +117,8 @@ class OnlineAgent(object):
                  lr_decay=False,
                  lr_maxt=1000,
                  grad_norm=1.0,
+                 vmin=0,
+                 vmax=10,
                  ):
 
         self.model = MLP(state_dim=state_dim, action_dim=action_dim, device=device)
@@ -87,7 +143,9 @@ class OnlineAgent(object):
         self.ema_model = copy.deepcopy(self.actor)
         self.update_ema_every = update_ema_every
 
-        self.critic = Critic(state_dim, action_dim).to(device)
+        self.vmin = vmin
+        self.vmax = vmax
+        self.critic = DistributionalCritic(state_dim, action_dim, v_min=vmin, v_max=vmax).to(device)  # Critic(state_dim, action_dim).to(device)
         self.critic_target = copy.deepcopy(self.critic)
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=3e-4)
 
@@ -136,11 +194,32 @@ class OnlineAgent(object):
             else:
                 next_action = self.ema_model(next_state)
                 target_q1, target_q2 = self.critic_target(next_state, next_action)
-                target_q = torch.min(target_q1, target_q2)
+                # target_q = torch.min(target_q1, target_q2)
+                done = (1 - not_done).float()
+                target_Q1_projected = projection(next_dist=target_q1,
+                                                    reward=reward,
+                                                    done=done,
+                                                    gamma=self.discount,
+                                                    v_min=self.vmin,
+                                                    v_max=self.vmax,
+                                                    num_atoms=101,
+                                                    support=self.critic.z_atoms,
+                                                    device=self.device)
+                target_Q2_projected = projection(next_dist=target_q2,
+                                                    reward=reward,
+                                                    done=done,
+                                                    gamma=self.discount,
+                                                    v_min=self.vmin,
+                                                    v_max=self.vmax,
+                                                    num_atoms=101,
+                                                    support=self.critic.z_atoms,
+                                                    device=self.device)
+                target_q = torch.min(target_Q1_projected, target_Q2_projected)
 
-            target_q = (reward + not_done * self.discount * target_q).detach()
+            # target_q = (reward + not_done * self.discount * target_q).detach()
 
-            critic_loss = F.mse_loss(current_q1, target_q) + F.mse_loss(current_q2, target_q)
+            # critic_loss = F.mse_loss(current_q1, target_q) + F.mse_loss(current_q2, target_q)
+            critic_loss = F.binary_cross_entropy(current_q1, target_q) + F.binary_cross_entropy(current_q2, target_q)
 
             self.critic_optimizer.zero_grad()
             critic_loss.backward()

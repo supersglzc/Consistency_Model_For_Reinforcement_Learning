@@ -8,21 +8,21 @@ metric:
   goal: maximize
   name: reward
 parameters:
-  --env_name:
+  env_name:
     values:
-      - dm_control/dog-run
-  --seed:
+      - myoHandObjHoldRandom-v0 
+  seed:
     values:
       - 0
       - 1
       - 2
       - 3
       - 4
-  --model:
+  model:
     values:
-      - consistency
+      - diffusion
 
-program: online_dm.py
+program: online_myo.py
 
 
 # 0.23.1
