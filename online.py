@@ -140,7 +140,7 @@ def train_agent(state_dim, action_dim, max_action, device, output_dir, writer, a
         if global_step > args.learning_starts:
             if global_step % args.train_frequency == 0:
                 loss_metric = agent.train(rb,
-                                        iterations=8,
+                                        iterations=1,
                                         batch_size=args.batch_size,
                                         log_writer=writer)
                 curr_time = time.time()

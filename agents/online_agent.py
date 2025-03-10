@@ -145,7 +145,8 @@ class OnlineAgent(object):
 
         self.vmin = vmin
         self.vmax = vmax
-        self.critic = DistributionalCritic(state_dim, action_dim, v_min=vmin, v_max=vmax).to(device)  # Critic(state_dim, action_dim).to(device)
+        # self.critic = Critic(state_dim, action_dim).to(device)
+        self.critic = DistributionalCritic(state_dim, action_dim, v_min=vmin, v_max=vmax).to(device)
         self.critic_target = copy.deepcopy(self.critic)
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=3e-4)
 
@@ -231,6 +232,8 @@ class OnlineAgent(object):
             new_action = self.actor(state)
 
             q1_new_action, q2_new_action = self.critic(state, new_action)
+            q1_new_action = torch.sum(q1_new_action * self.critic.z_atoms.to(self.device), dim=1)
+            q2_new_action = torch.sum(q2_new_action * self.critic.z_atoms.to(self.device), dim=1)
             if np.random.uniform() > 0.5:
                 q_loss = - q1_new_action.mean() / q2_new_action.abs().mean().detach()
             else:
