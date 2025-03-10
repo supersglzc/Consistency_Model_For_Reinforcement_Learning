@@ -10,7 +10,8 @@ metric:
 parameters:
   --env_name:
     values:
-      - dm_control/dog-run
+      - Ant-v3
+      - Humanoid-v3
   --seed:
     values:
       - 0
@@ -20,9 +21,9 @@ parameters:
       - 4
   --model:
     values:
-      - consistency
+      - diffusion
 
-program: online_dm.py
+program: online.py
 
 
 # 0.23.1
