@@ -89,7 +89,9 @@ def train_agent(state_dim, action_dim, max_action, device, output_dir, writer, a
                 n_timesteps=args.T,
                 lr=args.lr,
                 lr_decay=args.lr_decay,
-                grad_norm=args.gn)
+                grad_norm=args.gn,
+                vmin=-200,
+                vmax=200)
 
     if args.load_model != "":
         agent.load_model(args.load_model, args.load_id)
@@ -148,7 +150,7 @@ def train_agent(state_dim, action_dim, max_action, device, output_dir, writer, a
         if global_step > args.learning_starts:
             if global_step % args.train_frequency == 0:
                 loss_metric = agent.train(rb,
-                                        iterations=1,
+                                        iterations=2,
                                         batch_size=args.batch_size,
                                         log_writer=writer)
                 curr_time = time.time()
